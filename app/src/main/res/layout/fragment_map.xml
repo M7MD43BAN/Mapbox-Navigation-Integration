@@ -23,16 +23,18 @@
         app:cardMaxElevation="4dp"
         android:visibility="visible"
         app:cardElevation="8dp"
+        app:cardCornerRadius="8dp"
         app:cardUseCompatPadding="false"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="16dp"
         app:layout_constraintStart_toStartOf="parent">
 
         <com.mapbox.navigation.ui.tripprogress.view.MapboxTripProgressView
             android:id="@+id/tripProgressView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="16dp" />
+            android:padding="16dp" />
 
     </androidx.cardview.widget.CardView>
 
