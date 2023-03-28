@@ -253,7 +253,7 @@ class MapFragment : Fragment() {
         mapboxAccessToken = getString(R.string.mapbox_access_token)
 
 
-        val p = intent.getSerializableExtra("waypoints") as? MutableList<Point>
+        val p = requireActivity().intent.getSerializableExtra("waypoints") as? MutableList<Point>
         if (p != null) points = p
         else points = listOf(
             Point.fromLngLat(77.5946, 12.9216),
