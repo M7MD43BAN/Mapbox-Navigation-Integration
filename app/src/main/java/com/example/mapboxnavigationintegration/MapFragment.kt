@@ -28,9 +28,7 @@ import com.mapbox.navigation.base.TimeFormat
 import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.extensions.applyLanguageAndVoiceUnitOptions
 import com.mapbox.navigation.base.options.NavigationOptions
-import com.mapbox.navigation.base.route.RouterCallback
-import com.mapbox.navigation.base.route.RouterFailure
-import com.mapbox.navigation.base.route.RouterOrigin
+import com.mapbox.navigation.base.route.*
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.MapboxNavigationProvider
 import com.mapbox.navigation.core.directions.session.RoutesObserver
@@ -58,6 +56,7 @@ import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
 import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineOptions
 import com.mapbox.navigation.ui.maps.route.line.model.RouteLine
+import com.mapbox.navigation.ui.maps.route.line.model.toNavigationRouteLines
 import com.mapbox.navigation.ui.tripprogress.api.MapboxTripProgressApi
 import com.mapbox.navigation.ui.tripprogress.model.*
 import com.mapbox.navigation.ui.voice.api.MapboxSpeechApi
@@ -177,8 +176,7 @@ class MapFragment : Fragment() {
                 firstLocationUpdateReceived = true
                 navigationCamera.requestNavigationCameraToOverview(
                     stateTransitionOptions = NavigationCameraTransitionOptions.Builder()
-                        .maxDuration(0)
-                        .build()
+                        .maxDuration(0).build()
                 )
             }
         }
@@ -210,18 +208,21 @@ class MapFragment : Fragment() {
     }
 
     private val routesObserver = RoutesObserver { routeUpdateResult ->
-        if (routeUpdateResult.routes.isNotEmpty()) {
+        if (routeUpdateResult.navigationRoutes.toDirectionsRoutes().isNotEmpty()) {
             val routeLines = routeUpdateResult.routes.map { RouteLine(it, null) }
 
-            routeLineApi.setRoutes(
+            routeLineApi.setNavigationRouteLines(
                 routeLines
+                    .toNavigationRouteLines()
             ) { value ->
                 mapboxMap.getStyle()?.apply {
                     routeLineView.renderRouteDrawData(this, value)
                 }
             }
 
-            viewportDataSource.onRouteChanged(routeUpdateResult.routes.first())
+            viewportDataSource.onRouteChanged(
+                routeUpdateResult.navigationRoutes.toDirectionsRoutes().first().toNavigationRoute()
+            )
             viewportDataSource.evaluate()
         } else {
             val style = mapboxMap.getStyle()
@@ -243,21 +244,15 @@ class MapFragment : Fragment() {
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
         binding = FragmentMapBinding.inflate(inflater, container, false)
-        return binding.root
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
 
         mapboxMap = binding.mapView.getMapboxMap()
         mapboxAccessToken = getString(R.string.mapbox_access_token)
 
 
-        val p = requireActivity().intent.getSerializableExtra("waypoints") as? MutableList<Point>
-        if (p != null) points = p
-        else points = listOf(
-            Point.fromLngLat(77.5946, 12.9216),
-            Point.fromLngLat(77.5946, 12.3216)
+        val p = requireActivity().intent.getParcelableExtra("waypoints") as? MutableList<Point>
+        points = if (p != null) p
+        else listOf(
+            Point.fromLngLat(77.5946, 12.9216), Point.fromLngLat(77.5946, 12.3216)
         ).toMutableList()
 
         binding.mapView.location.apply {
@@ -267,24 +262,18 @@ class MapFragment : Fragment() {
             enabled = true
         }
 
-
-
         mapboxNavigation = if (MapboxNavigationProvider.isCreated()) {
             MapboxNavigationProvider.retrieve()
         } else {
             MapboxNavigationProvider.create(
                 NavigationOptions.Builder(applicationContext = requireContext())
-                    .accessToken(mapboxAccessToken)
-                    .locationEngine(replayLocationEngine)
-                    .build()
+                    .accessToken(mapboxAccessToken).locationEngine(replayLocationEngine).build()
             )
         }
 
         viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
         navigationCamera = NavigationCamera(
-            mapboxMap,
-            binding.mapView.camera,
-            viewportDataSource
+            mapboxMap, binding.mapView.camera, viewportDataSource
         )
 
         binding.mapView.camera.addCameraAnimationsLifecycleListener(
@@ -293,11 +282,10 @@ class MapFragment : Fragment() {
         navigationCamera.registerNavigationCameraStateChangeObserver { navigationCameraState ->
 
             when (navigationCameraState) {
-                NavigationCameraState.TRANSITION_TO_FOLLOWING,
-                NavigationCameraState.FOLLOWING -> binding.recenter.visibility = View.INVISIBLE
-                NavigationCameraState.TRANSITION_TO_OVERVIEW,
-                NavigationCameraState.OVERVIEW,
-                NavigationCameraState.IDLE -> binding.recenter.visibility = View.VISIBLE
+                NavigationCameraState.TRANSITION_TO_FOLLOWING, NavigationCameraState.FOLLOWING -> binding.recenter.visibility =
+                    View.INVISIBLE
+                NavigationCameraState.TRANSITION_TO_OVERVIEW, NavigationCameraState.OVERVIEW, NavigationCameraState.IDLE -> binding.recenter.visibility =
+                    View.VISIBLE
             }
         }
 
@@ -315,44 +303,34 @@ class MapFragment : Fragment() {
 
         val distanceFormatterOptions = mapboxNavigation.navigationOptions.distanceFormatterOptions
 
-
         maneuverApi = MapboxManeuverApi(
             MapboxDistanceFormatter(distanceFormatterOptions)
         )
 
 
         tripProgressApi = MapboxTripProgressApi(
-            TripProgressUpdateFormatter.Builder(requireContext())
-                .distanceRemainingFormatter(
-                    DistanceRemainingFormatter(distanceFormatterOptions)
-                )
-                .timeRemainingFormatter(
-                    TimeRemainingFormatter(requireContext())
-                )
-                .percentRouteTraveledFormatter(
-                    PercentDistanceTraveledFormatter()
-                )
-                .estimatedTimeToArrivalFormatter(
-                    EstimatedTimeToArrivalFormatter(requireContext(), TimeFormat.NONE_SPECIFIED)
-                )
-                .build()
+            TripProgressUpdateFormatter.Builder(requireContext()).distanceRemainingFormatter(
+                DistanceRemainingFormatter(distanceFormatterOptions)
+            ).timeRemainingFormatter(
+                TimeRemainingFormatter(requireContext())
+            ).percentRouteTraveledFormatter(
+                PercentDistanceTraveledFormatter()
+            ).estimatedTimeToArrivalFormatter(
+                EstimatedTimeToArrivalFormatter(requireContext(), TimeFormat.NONE_SPECIFIED)
+            ).build()
         )
 
 
         speechApi = MapboxSpeechApi(
-            requireContext(),
-            mapboxAccessToken!!,
-            Locale.US.language
+            requireContext(), mapboxAccessToken!!, Locale.US.language
         )
         voiceInstructionsPlayer = MapboxVoiceInstructionsPlayer(
-            requireContext(),
-            mapboxAccessToken!!,
-            Locale.US.language
+            requireContext(), mapboxAccessToken!!, Locale.US.language
         )
 
-        val mapboxRouteLineOptions = MapboxRouteLineOptions.Builder(requireContext())
-            .withRouteLineBelowLayerId("road-label")
-            .build()
+        val mapboxRouteLineOptions =
+            MapboxRouteLineOptions.Builder(requireContext()).withRouteLineBelowLayerId("road-label")
+                .build()
         routeLineApi = MapboxRouteLineApi(mapboxRouteLineOptions)
         routeLineView = MapboxRouteLineView(mapboxRouteLineOptions)
 
@@ -364,13 +342,6 @@ class MapFragment : Fragment() {
         ) {
             findRoute(points[1])
         }
-
-        println("=========MOSTAFAFAFAFAFAFAFAFAFAMOSTAFAFAFAFAFAFAFAFAFAMOSTAFAFAFAFAFAFAFAFAFAMOSTAFAFAFAFAFAFAFAFAFAMOSTAFAFAFAFAFAFAFAFAFA=======")
-        println("points[1].latitude()")
-        println(points[1].latitude())
-        println("points[1].longitude()")
-        println(points[1].longitude())
-        println("-=-=-=-=-=-=-=-=-=-=-=---=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-==-=")
 
         binding.recenter.setOnClickListener {
             navigationCamera.requestNavigationCameraToFollowing()
@@ -400,9 +371,17 @@ class MapFragment : Fragment() {
             //                                          int[] grantResults)
             // to handle the case where the user grants the permission. See the documentation
             // for ActivityCompat#requestPermissions for more details.
-            return
+
         }
         mapboxNavigation.startTripSession()
+
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+
     }
 
     override fun onStart() {
@@ -456,33 +435,23 @@ class MapFragment : Fragment() {
             Point.fromLngLat(points[0].longitude(), points[0].latitude())
         } ?: return
 
-        mapboxNavigation.requestRoutes(
-            RouteOptions.builder()
-                .applyDefaultNavigationOptions()
-                .applyLanguageAndVoiceUnitOptions(requireContext())
-                .coordinatesList(listOf(originPoint, destination))
-                .bearingsList(
-                    listOf(
-                        Bearing.builder()
-                            .angle(originLocation.bearing.toDouble())
-                            .degrees(45.0)
-                            .build(),
-                        null
-                    )
+        mapboxNavigation.requestRoutes(RouteOptions.builder().applyDefaultNavigationOptions()
+            .applyLanguageAndVoiceUnitOptions(requireContext())
+            .coordinatesList(listOf(originPoint, destination)).bearingsList(
+                listOf(
+                    Bearing.builder().angle(originLocation.bearing.toDouble()).degrees(45.0)
+                        .build(), null
                 )
-                .layersList(listOf(mapboxNavigation.getZLevel(), null))
-                .build(),
+            ).layersList(listOf(mapboxNavigation.getZLevel(), null)).build(),
             object : RouterCallback {
                 override fun onRoutesReady(
-                    routes: List<DirectionsRoute>,
-                    routerOrigin: RouterOrigin
+                    routes: List<DirectionsRoute>, routerOrigin: RouterOrigin
                 ) {
                     setRouteAndStartNavigation(routes)
                 }
 
                 override fun onFailure(
-                    reasons: List<RouterFailure>,
-                    routeOptions: RouteOptions
+                    reasons: List<RouterFailure>, routeOptions: RouteOptions
                 ) {
 
                 }
@@ -490,13 +459,12 @@ class MapFragment : Fragment() {
                 override fun onCanceled(routeOptions: RouteOptions, routerOrigin: RouterOrigin) {
 
                 }
-            }
-        )
+            })
     }
 
     private fun setRouteAndStartNavigation(routes: List<DirectionsRoute>) {
 
-        mapboxNavigation.setRoutes(routes)
+        mapboxNavigation.setNavigationRoutes(routes.toNavigationRoutes())
         startSimulation(routes.first())
 
         binding.soundButton.visibility = View.VISIBLE
@@ -507,7 +475,7 @@ class MapFragment : Fragment() {
     }
 
     private fun clearRouteAndStopNavigation() {
-        mapboxNavigation.setRoutes(listOf())
+        mapboxNavigation.setNavigationRoutes(listOf<DirectionsRoute>().toNavigationRoutes())
 
         mapboxReplayer.stop()
 
@@ -526,85 +494,5 @@ class MapFragment : Fragment() {
             seekTo(replayEvents.first())
             play()
         }
-    }
-}
-
-/**
- * Helper class that that does 2 things:
- * 1. It stores waypoints
- * 2. Converts the stored waypoints to the [RouteOptions] params
- */
-class WaypointsSet {
-
-    private val waypoints = mutableListOf<Waypoint>()
-
-    val isEmpty get() = waypoints.isEmpty()
-
-    fun addNamed(point: Point, name: String) {
-        waypoints.add(Waypoint(point, WaypointType.Named(name)))
-    }
-
-    fun addRegular(point: Point) {
-        waypoints.add(Waypoint(point, WaypointType.Regular))
-    }
-
-    fun addSilent(point: Point) {
-        waypoints.add(Waypoint(point, WaypointType.Silent))
-    }
-
-    fun clear() {
-        waypoints.clear()
-    }
-
-    /***
-     * Silent waypoint isn't really a waypoint.
-     * It's just a coordinate that used to build a route.
-     * That's why to make a waypoint silent we exclude its index from the waypointsIndices.
-     */
-    fun waypointsIndices(): List<Int> {
-        return waypoints.mapIndexedNotNull { index, _ ->
-            if (waypoints.isSilentWaypoint(index)) {
-                null
-            } else index
-        }
-    }
-
-    /**
-     * Returns names for added waypoints.
-     * Silent waypoint can't have a name unless they're converted to regular because of position.
-     * First and last waypoint can't be silent.
-     */
-    fun waypointsNames(): List<String> = waypoints
-        // silent waypoints can't have a name
-        .filterIndexed { index, _ ->
-            !waypoints.isSilentWaypoint(index)
-        }
-        .map {
-            when (it.type) {
-                is WaypointType.Named -> it.type.name
-                else -> ""
-            }
-        }
-
-    fun coordinatesList(): List<Point> {
-        return waypoints.map { it.point }
-    }
-
-    private sealed class WaypointType {
-        data class Named(val name: String) : WaypointType()
-        object Regular : WaypointType()
-        object Silent : WaypointType()
-    }
-
-    private data class Waypoint(val point: Point, val type: WaypointType)
-
-    private fun List<Waypoint>.isSilentWaypoint(index: Int) =
-        this[index].type == WaypointType.Silent && canWaypointBeSilent(index)
-
-    // the first and the last waypoint can't be silent
-    private fun List<Waypoint>.canWaypointBeSilent(index: Int): Boolean {
-        val isLastWaypoint = index == this.size - 1
-        val isFirstWaypoint = index == 0
-        return !isLastWaypoint && !isFirstWaypoint
     }
 }
